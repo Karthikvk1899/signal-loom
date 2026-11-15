@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "signal-loom"
+version = "0.1.0"
+description = "Reviewed releases and signed offline feature evaluation"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "psycopg[binary,pool]>=3.2,<4", "cryptography>=44", "httpx>=0.28,<1"]
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-cov>=6", "ruff>=0.11", "pip-audit>=2.9"]
+[tool.setuptools.package-data]
+loom = ["schema.sql"]
+[tool.setuptools.packages.find]
+include = ["loom*"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires real PostgreSQL"]
+[tool.ruff]
+line-length = 110
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["B008"]

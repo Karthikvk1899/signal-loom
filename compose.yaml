@@ -1,0 +1,58 @@
+name: signal-loom
+x-app: &app
+  build: .
+  environment: &environment
+    DATABASE_URL: postgresql://loom:local-dev-only@db:5432/loom
+    ADMIN_KEY: ${ADMIN_KEY:?Run python scripts/init_env.py first}
+    SIGNING_KEY: ${SIGNING_KEY:?Run python scripts/init_env.py first}
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: loom
+      POSTGRES_PASSWORD: local-dev-only
+      POSTGRES_DB: loom
+    volumes: [data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U loom -d loom]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate:
+    <<: *app
+    command: [python, -m, loom.migrate]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    <<: *app
+    ports: [127.0.0.1:8080:8080]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready', timeout=2)"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+  console:
+    build: ./ui
+    ports: [127.0.0.1:3000:8080]
+    depends_on:
+      api: {condition: service_healthy}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  integration:
+    <<: *app
+    profiles: [test]
+    environment:
+      <<: *environment
+      TEST_URL: http://api:8080
+    command: [pytest, -q, -m, integration, tests/test_integration.py]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  data:
