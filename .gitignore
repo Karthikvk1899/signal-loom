@@ -11,3 +11,6 @@ ui/dist/
 keys/
 
 *.tsbuildinfo
+
+ui/test-results/
+ui/playwright-report/

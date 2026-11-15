@@ -37,6 +37,7 @@ app = FastAPI(title="Signal Loom", version="0.1.0", lifespan=lifespan)
 
 class BodyLimit:
     """Bound actual bytes, including chunked requests, before JSON parsing."""
+
     def __init__(self, app):
         self.app = app
 
@@ -50,12 +51,16 @@ class BodyLimit:
                 return
             size += len(message.get("body", b""))
             if size > 65536:
-                return await JSONResponse({"detail": "body limit 65536 bytes"}, status_code=413)(scope, receive, send)
+                return await JSONResponse({"detail": "body limit 65536 bytes"}, status_code=413)(
+                    scope, receive, send
+                )
             chunks.append(message)
             if not message.get("more_body", False):
                 break
+
         async def replay():
             return chunks.pop(0) if chunks else await receive()
+
         await self.app(scope, replay, send)
 
 
@@ -94,8 +99,10 @@ def administrator(token: str = Depends(bearer)):
 
 def principal(token: str = Depends(bearer)):
     with connection() as conn:
-        actor = conn.execute("SELECT id,tenant,actor,role FROM credentials WHERE key_hash=%s AND NOT revoked",
-                             (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+        actor = conn.execute(
+            "SELECT id,tenant,actor,role FROM credentials WHERE key_hash=%s AND NOT revoked",
+            (hashlib.sha256(token.encode()).hexdigest(),),
+        ).fetchone()
     if actor is None:
         raise HTTPException(401, "invalid or revoked credential")
     return actor
@@ -108,8 +115,11 @@ def require(actor, role):
 
 def environment(conn, tenant, name, lock=False):
     # Fixed queries; no caller-controlled SQL identifiers.
-    query = ("SELECT * FROM environments WHERE tenant=%s AND name=%s FOR UPDATE" if lock
-             else "SELECT * FROM environments WHERE tenant=%s AND name=%s")
+    query = (
+        "SELECT * FROM environments WHERE tenant=%s AND name=%s FOR UPDATE"
+        if lock
+        else "SELECT * FROM environments WHERE tenant=%s AND name=%s"
+    )
     row = conn.execute(query, (tenant, name)).fetchone()
     if row is None:
         raise HTTPException(404, "environment not found")
@@ -117,18 +127,26 @@ def environment(conn, tenant, name, lock=False):
 
 
 def revision(conn, tenant, env, ident):
-    row = conn.execute("SELECT * FROM revisions WHERE id=%s AND tenant=%s AND environment=%s",
-                       (ident, tenant, env)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM revisions WHERE id=%s AND tenant=%s AND environment=%s", (ident, tenant, env)
+    ).fetchone()
     if row is None:
         raise HTTPException(404, "revision not found")
     return row
 
 
 def audit(conn, actor, env, action, **data):
-    event = {"schema_version": 1, "event_id": str(uuid.uuid4()), "action": action,
-             "actor": actor["actor"], "environment": env, **data}
-    conn.execute("INSERT INTO audit(tenant,environment,event) VALUES (%s,%s,%s)",
-                 (actor["tenant"], env, Jsonb(event)))
+    event = {
+        "schema_version": 1,
+        "event_id": str(uuid.uuid4()),
+        "action": action,
+        "actor": actor["actor"],
+        "environment": env,
+        **data,
+    }
+    conn.execute(
+        "INSERT INTO audit(tenant,environment,event) VALUES (%s,%s,%s)", (actor["tenant"], env, Jsonb(event))
+    )
 
 
 class CredentialInput(StrictModel):
@@ -141,8 +159,10 @@ class CredentialInput(StrictModel):
 def create_credential(body: CredentialInput):
     token, ident = secrets.token_urlsafe(40), uuid.uuid4()
     with connection() as conn:
-        conn.execute("INSERT INTO credentials(id,tenant,actor,role,key_hash) VALUES (%s,%s,%s,%s,%s)",
-                     (ident, body.tenant, body.actor, body.role, hashlib.sha256(token.encode()).hexdigest()))
+        conn.execute(
+            "INSERT INTO credentials(id,tenant,actor,role,key_hash) VALUES (%s,%s,%s,%s,%s)",
+            (ident, body.tenant, body.actor, body.role, hashlib.sha256(token.encode()).hexdigest()),
+        )
     return {"id": ident, "token": token, **body.model_dump()}
 
 
@@ -168,8 +188,10 @@ def create_environment(body: EnvironmentInput, actor=Depends(principal)):
 @app.get("/v1/environments")
 def list_environments(actor=Depends(principal)):
     with connection() as conn:
-        return conn.execute("SELECT name,generation,active_revision FROM environments WHERE tenant=%s ORDER BY name LIMIT 100",
-                            (actor["tenant"],)).fetchall()
+        return conn.execute(
+            "SELECT name,generation,active_revision FROM environments WHERE tenant=%s ORDER BY name LIMIT 100",
+            (actor["tenant"],),
+        ).fetchall()
 
 
 class DraftInput(StrictModel):
@@ -185,10 +207,21 @@ def propose(env: Name, body: DraftInput, actor=Depends(principal)):
         current = environment(conn, actor["tenant"], env, lock=True)
         if current["generation"] != body.base_generation:
             raise HTTPException(409, "base generation is stale")
-        conn.execute("""INSERT INTO revisions(id,tenant,environment,bundle,author,base_generation)
+        conn.execute(
+            """INSERT INTO revisions(id,tenant,environment,bundle,author,base_generation)
                      VALUES (%s,%s,%s,%s,%s,%s)""",
-                     (ident, actor["tenant"], env, Jsonb(body.bundle.model_dump()), actor["actor"], body.base_generation))
-        audit(conn, actor, env, "revision.proposed", revision=str(ident), base_generation=body.base_generation)
+            (
+                ident,
+                actor["tenant"],
+                env,
+                Jsonb(body.bundle.model_dump()),
+                actor["actor"],
+                body.base_generation,
+            ),
+        )
+        audit(
+            conn, actor, env, "revision.proposed", revision=str(ident), base_generation=body.base_generation
+        )
     return {"id": ident}
 
 
@@ -196,9 +229,11 @@ def propose(env: Name, body: DraftInput, actor=Depends(principal)):
 def list_revisions(env: Name, actor=Depends(principal)):
     with connection() as conn:
         environment(conn, actor["tenant"], env)
-        return conn.execute("""SELECT id,bundle,author,reviewer,status,base_generation,created_at FROM revisions
+        return conn.execute(
+            """SELECT id,bundle,author,reviewer,status,base_generation,created_at FROM revisions
                             WHERE tenant=%s AND environment=%s ORDER BY created_at DESC,id LIMIT 100""",
-                            (actor["tenant"], env)).fetchall()
+            (actor["tenant"], env),
+        ).fetchall()
 
 
 @app.post("/v1/environments/{env}/revisions/{ident}/approve")
@@ -210,7 +245,9 @@ def approve(env: Name, ident: uuid.UUID, actor=Depends(principal)):
         if draft["author"] == actor["actor"]:
             raise HTTPException(403, "author cannot approve their own revision")
         if draft["status"] == "draft":
-            conn.execute("UPDATE revisions SET status='approved',reviewer=%s WHERE id=%s", (actor["actor"], ident))
+            conn.execute(
+                "UPDATE revisions SET status='approved',reviewer=%s WHERE id=%s", (actor["actor"], ident)
+            )
             audit(conn, actor, env, "revision.approved", revision=str(ident))
     return {"id": ident, "status": "approved"}
 
@@ -231,22 +268,39 @@ def activate(env: Name, ident: uuid.UUID, body: ActivateInput, actor=Depends(pri
         if draft["status"] != "approved" or draft["author"] == actor["actor"]:
             raise HTTPException(403, "independently approved revision required")
         if body.rollback:
-            previous = conn.execute("SELECT 1 FROM activations WHERE tenant=%s AND environment=%s AND revision=%s LIMIT 1",
-                                    (actor["tenant"], env, ident)).fetchone()
+            previous = conn.execute(
+                "SELECT 1 FROM activations WHERE tenant=%s AND environment=%s AND revision=%s LIMIT 1",
+                (actor["tenant"], env, ident),
+            ).fetchone()
             if not previous:
                 raise HTTPException(409, "rollback target was never activated")
         elif draft["base_generation"] != state["generation"]:
             raise HTTPException(409, "revision based on stale generation; propose again")
         generation = state["generation"] + 1
-        payload = {"schema_version": 1, "environment": f'{actor["tenant"]}/{env}',
-                   "generation": generation, "revision": str(ident), "bundle": draft["bundle"]}
+        payload = {
+            "schema_version": 1,
+            "environment": f"{actor['tenant']}/{env}",
+            "generation": generation,
+            "revision": str(ident),
+            "bundle": draft["bundle"],
+        }
         envelope = sign(private, payload)
-        conn.execute("INSERT INTO activations(tenant,environment,generation,revision,envelope) VALUES (%s,%s,%s,%s,%s)",
-                     (actor["tenant"], env, generation, ident, Jsonb(envelope)))
-        conn.execute("UPDATE environments SET generation=%s,active_revision=%s WHERE tenant=%s AND name=%s",
-                     (generation, ident, actor["tenant"], env))
-        audit(conn, actor, env, "release.rolled_back" if body.rollback else "release.activated",
-              generation=generation, revision=str(ident))
+        conn.execute(
+            "INSERT INTO activations(tenant,environment,generation,revision,envelope) VALUES (%s,%s,%s,%s,%s)",
+            (actor["tenant"], env, generation, ident, Jsonb(envelope)),
+        )
+        conn.execute(
+            "UPDATE environments SET generation=%s,active_revision=%s WHERE tenant=%s AND name=%s",
+            (generation, ident, actor["tenant"], env),
+        )
+        audit(
+            conn,
+            actor,
+            env,
+            "release.rolled_back" if body.rollback else "release.activated",
+            generation=generation,
+            revision=str(ident),
+        )
     return {"generation": generation, "revision": ident}
 
 
@@ -254,9 +308,12 @@ def activate(env: Name, ident: uuid.UUID, body: ActivateInput, actor=Depends(pri
 def snapshot(env: Name, if_none_match: str = Header(default=""), actor=Depends(principal)):
     with connection() as conn:
         # One statement joins pointer and immutable activation from one MVCC snapshot.
-        row = conn.execute("""SELECT a.envelope,e.generation FROM environments e JOIN activations a
+        row = conn.execute(
+            """SELECT a.envelope,e.generation FROM environments e JOIN activations a
             ON a.tenant=e.tenant AND a.environment=e.name AND a.generation=e.generation
-            WHERE e.tenant=%s AND e.name=%s""", (actor["tenant"], env)).fetchone()
+            WHERE e.tenant=%s AND e.name=%s""",
+            (actor["tenant"], env),
+        ).fetchone()
     if row is None:
         raise HTTPException(404, "no active release")
     etag = '"' + hashlib.sha256(canonical(row["envelope"])).hexdigest() + '"'
@@ -275,16 +332,20 @@ class PreviewInput(StrictModel):
 def preview(env: Name, body: PreviewInput, actor=Depends(principal)):
     with connection() as conn:
         environment(conn, actor["tenant"], env)
-    return [evaluate(body.bundle, f'{actor["tenant"]}/{env}', body.flag, subject) for subject in body.subjects]
+    return [
+        evaluate(body.bundle, f"{actor['tenant']}/{env}", body.flag, subject) for subject in body.subjects
+    ]
 
 
 @app.get("/v1/environments/{env}/audit")
 def history(env: Name, after: Annotated[int, Query(ge=0)] = 0, actor=Depends(principal)):
     with connection() as conn:
         environment(conn, actor["tenant"], env)
-        return conn.execute("""SELECT sequence,event,created_at FROM audit
+        return conn.execute(
+            """SELECT sequence,event,created_at FROM audit
             WHERE tenant=%s AND environment=%s AND sequence>%s ORDER BY sequence LIMIT 100""",
-                            (actor["tenant"], env, after)).fetchall()
+            (actor["tenant"], env, after),
+        ).fetchall()
 
 
 @app.get("/v1/key", dependencies=[Depends(principal)])

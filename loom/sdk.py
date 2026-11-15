@@ -1,4 +1,5 @@
 """Thread-safe in-memory last-known-good SDK; pin a trusted public key out of band."""
+
 import threading
 import time
 
@@ -9,8 +10,15 @@ from loom.signing import verify
 
 
 class Client:
-    def __init__(self, url: str, token: str, public_key: str, environment: str,
-                 max_age: float = 60, clock=time.monotonic):
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        public_key: str,
+        environment: str,
+        max_age: float = 60,
+        clock=time.monotonic,
+    ):
         if not 0 < max_age <= 3600:
             raise ValueError("max_age must be in (0, 3600]")
         self.url, self.token, self.public_key = url.rstrip("/"), token, public_key
@@ -22,8 +30,12 @@ class Client:
 
     def accept(self, envelope: dict):
         payload = verify(self.public_key, envelope)
-        if (payload.get("schema_version") != 1 or payload["environment"] != self.environment
-                or type(payload["generation"]) is not int or payload["generation"] < 1):
+        if (
+            payload.get("schema_version") != 1
+            or payload["environment"] != self.environment
+            or type(payload["generation"]) is not int
+            or payload["generation"] < 1
+        ):
             raise ValueError("snapshot scope/type mismatch")
         bundle = Bundle.model_validate(payload["bundle"])
         with self._lock:
@@ -41,8 +53,12 @@ class Client:
             if self._etag:
                 headers["If-None-Match"] = self._etag
             try:
-                response = httpx.get(f"{self.url}/v1/environments/{self.environment.split('/')[-1]}/snapshot",
-                                     headers=headers, timeout=5, follow_redirects=False)
+                response = httpx.get(
+                    f"{self.url}/v1/environments/{self.environment.split('/')[-1]}/snapshot",
+                    headers=headers,
+                    timeout=5,
+                    follow_redirects=False,
+                )
                 if response.status_code == 304:
                     with self._lock:
                         if self._bundle is None:
@@ -58,6 +74,7 @@ class Client:
             except Exception as exc:
                 # Signature failures must retain the previous verified bundle, never trust new data.
                 from cryptography.exceptions import InvalidSignature
+
                 if isinstance(exc, InvalidSignature):
                     return False
                 raise

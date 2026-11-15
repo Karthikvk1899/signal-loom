@@ -14,8 +14,12 @@ def setup():
     private = Ed25519PrivateKey.generate()
     now = [0]
     client = Client("http://localhost:8080", "token", public_key(private), "acme/prod", 10, lambda: now[0])
-    payload = {"schema_version": 1, "environment": "acme/prod", "generation": 1,
-               "bundle": {"flags": [{"key": "checkout", "salt": "v1", "rollout": 10000}]}}
+    payload = {
+        "schema_version": 1,
+        "environment": "acme/prod",
+        "generation": 1,
+        "bundle": {"flags": [{"key": "checkout", "salt": "v1", "rollout": 10000}]},
+    }
     return private, now, client, payload
 
 
@@ -45,8 +49,12 @@ def test_tampering_and_wrong_key(setup):
 def test_scope_regression_and_equivocation(setup):
     private, _, client, payload = setup
     client.accept(sign(private, payload))
-    for bad in [{**payload, "environment": "other/prod"}, {**payload, "generation": 0},
-                {**payload, "generation": True}, {**payload, "bundle": {"flags": []}}]:
+    for bad in [
+        {**payload, "environment": "other/prod"},
+        {**payload, "generation": 0},
+        {**payload, "generation": True},
+        {**payload, "bundle": {"flags": []}},
+    ]:
         with pytest.raises(ValueError):
             client.accept(sign(private, bad))
     assert client.evaluate("checkout", "x")["value"]
@@ -55,8 +63,10 @@ def test_scope_regression_and_equivocation(setup):
 def test_transport_failure_does_not_extend_freshness(setup, monkeypatch):
     private, now, client, payload = setup
     client.accept(sign(private, payload))
+
     def fail(*args, **kwargs):
         raise httpx.ConnectError("offline")
+
     monkeypatch.setattr(httpx, "get", fail)
     now[0] = 9
     assert not client.refresh()
@@ -66,15 +76,23 @@ def test_transport_failure_does_not_extend_freshness(setup, monkeypatch):
 
 def test_etag_refresh_and_corrupt_response(setup, monkeypatch):
     private, now, client, payload = setup
-    responses = [httpx.Response(200, json=sign(private, payload), headers={"etag": '"one"'},
-                               request=httpx.Request("GET", "http://localhost")),
-                 httpx.Response(304), httpx.Response(200, json={"bad": True},
-                                                    request=httpx.Request("GET", "http://localhost"))]
+    responses = [
+        httpx.Response(
+            200,
+            json=sign(private, payload),
+            headers={"etag": '"one"'},
+            request=httpx.Request("GET", "http://localhost"),
+        ),
+        httpx.Response(304),
+        httpx.Response(200, json={"bad": True}, request=httpx.Request("GET", "http://localhost")),
+    ]
+
     def get(url, headers, **kwargs):
         assert url.endswith("/v1/environments/prod/snapshot")
         if len(responses) < 3:
             assert headers["If-None-Match"] == '"one"'
         return responses.pop(0)
+
     monkeypatch.setattr(httpx, "get", get)
     assert client.refresh()
     now[0] = 9

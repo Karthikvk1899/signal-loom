@@ -1,4 +1,5 @@
 """Explicit schema initialization. Run once before API replicas start."""
+
 import os
 from pathlib import Path
 

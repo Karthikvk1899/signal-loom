@@ -1,48 +1,571 @@
-import React, {useState} from 'react';
-import {createRoot} from 'react-dom/client';
-import './style.css';
+import React, { useState } from "react";
+import { createRoot } from "react-dom/client";
+import "./style.css";
 
-type Flag={key:string;enabled:boolean;rollout:number;salt:string;allow:string[];deny:string[]};
-type Bundle={schema_version:number;flags:Flag[]};
-type Environment={name:string;generation:number;active_revision:string|null};
-type Revision={id:string;bundle:Bundle;author:string;reviewer:string|null;status:string;base_generation:number;created_at:string};
-type Event={sequence:number;created_at:string;event:{action:string;actor:string;generation?:number;revision?:string}};
-const initial:Bundle={schema_version:1,flags:[{key:'new_checkout',enabled:true,rollout:1000,salt:'cohort-v1',allow:[],deny:[]}]};
+type Flag = {
+  key: string;
+  enabled: boolean;
+  rollout: number;
+  salt: string;
+  allow: string[];
+  deny: string[];
+};
+type Bundle = { schema_version: number; flags: Flag[] };
+type Environment = {
+  name: string;
+  generation: number;
+  active_revision: string | null;
+};
+type Revision = {
+  id: string;
+  bundle: Bundle;
+  author: string;
+  reviewer: string | null;
+  status: string;
+  base_generation: number;
+  created_at: string;
+};
+type Event = {
+  sequence: number;
+  created_at: string;
+  event: {
+    action: string;
+    actor: string;
+    generation?: number;
+    revision?: string;
+  };
+};
+const initial: Bundle = {
+  schema_version: 1,
+  flags: [
+    {
+      key: "new_checkout",
+      enabled: true,
+      rollout: 1000,
+      salt: "cohort-v1",
+      allow: [],
+      deny: [],
+    },
+  ],
+};
 
-export function App(){
- const [token,setToken]=useState(''),[connected,setConnected]=useState(false),[role,setRole]=useState('author');
- const [envs,setEnvs]=useState<Environment[]>([]),[env,setEnv]=useState('prod'),[newEnv,setNewEnv]=useState('prod');
- const [revisions,setRevisions]=useState<Revision[]>([]),[events,setEvents]=useState<Event[]>([]);
- const [draft,setDraft]=useState(JSON.stringify(initial,null,2)),[subjects,setSubjects]=useState('customer-1\ncustomer-2\ncustomer-3');
- const [flag,setFlag]=useState('new_checkout'),[preview,setPreview]=useState<{value:boolean;reason:string;bucket?:number}[]>([]);
- const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
- const current=envs.find(e=>e.name===env),generation=current?.generation??0;
- async function api(path:string,method='GET',body?:unknown){
-  const response=await fetch('/v1'+path,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
-  if(!response.ok){const detail=await response.json().catch(()=>({detail:'Request failed'}));throw new Error(typeof detail.detail==='string'?detail.detail:JSON.stringify(detail.detail));}
-  return response.status===204?null:response.json();
- }
- async function load(selected=env){
-  const list:Environment[]=await api('/environments');setEnvs(list);
-  if(list.some(e=>e.name===selected)){
-   const [r,a]=await Promise.all([api(`/environments/${selected}/revisions`),api(`/environments/${selected}/audit`)]);
-   setRevisions(r);setEvents(a);
-  }else{setRevisions([]);setEvents([]);}
- }
- async function run(work:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await work();}catch(e){setError(e instanceof Error?e.message:'Request failed');}finally{setBusy(false);}}
- const root=`/environments/${env}`;
- function disconnect(){setToken('');setConnected(false);setEnvs([]);setRevisions([]);setEvents([]);setPreview([]);setError('');setNotice('');}
- return <div className="shell">
-  <aside><a className="brand" href="#"><span className="mark">≋</span> SIGNAL LOOM</a><div className="workspace">RELEASE WORKSPACE</div><div className="nav active">◉ &nbsp; Release control</div><div className="nav muted">↳ &nbsp; Review · Activate · Observe</div><div className="side-note"><span className="dot"/> Local evaluation<br/><small>Signed snapshots. Stable cohorts.<br/>Explicit freshness limits.</small></div></aside>
-  <main><header><div><div className="eyebrow">CONTROL PLANE / ENVIRONMENTS</div><h1>Ship with a clear signal.</h1><p>Review the change. Preview its reach. Release with a record.</p></div><span className="badge">REFERENCE SYSTEM · v0.1</span></header>
-  <section className="connection"><label>Session credential<input aria-label="Session credential" type="password" autoComplete="off" value={token} disabled={connected} placeholder="Paste a scoped credential" onChange={e=>setToken(e.target.value)}/></label><label>Console view<select aria-label="Console view" value={role} onChange={e=>setRole(e.target.value)}><option value="author">Author</option><option value="reviewer">Reviewer</option><option value="reader">Reader</option></select></label><button disabled={busy||!token} onClick={()=>connected?disconnect():run(async()=>{await load();setConnected(true);})}>{connected?'Disconnect':'Connect'}</button><small>Token stays in memory. The API enforces your role.</small></section>
-  {error&&<div role="alert" className="alert">{error}</div>}{notice&&<div role="status" className="notice">{notice}</div>}
-  {!connected?<section className="welcome"><span className="eyebrow">A RELEASE IS A REVIEWED DECISION</span><h2>From proposal to a verified snapshot.</h2><div className="steps"><div><b>01 / Propose</b><p>Build an immutable configuration against the current generation.</p></div><div><b>02 / Review</b><p>A different actor checks the rules and approves the change.</p></div><div><b>03 / Activate</b><p>Publish atomically. Clients verify and evaluate locally.</p></div></div><p className="muted">Run the quick-start seed script to create independent author, reviewer, and SDK credentials.</p></section>:<>
-  <section className="toolbar"><label>Environment<select aria-label="Environment" value={env} onChange={e=>{const selected=e.target.value;setEnv(selected);setPreview([]);void run(()=>load(selected));}}>{envs.length?envs.map(e=><option key={e.name}>{e.name}</option>):<option>prod</option>}</select></label><button className="secondary" disabled={busy} onClick={()=>run(()=>load())}>Refresh</button>{role==='author'&&<><input aria-label="New environment" value={newEnv} onChange={e=>setNewEnv(e.target.value)}/><button className="secondary" disabled={busy} onClick={()=>run(async()=>{await api('/environments','POST',{name:newEnv});setEnv(newEnv);await load(newEnv);})}>Create environment</button></>}</section>
-  <div className="metrics"><article><span>ACTIVE GENERATION</span><strong>{generation.toString().padStart(2,'0')}</strong><small>Compare-and-set release boundary</small></article><article><span>REVISIONS SHOWN</span><strong>{revisions.length}</strong><small>Latest 100 proposals</small></article><article><span>ACTIVE REVISION</span><strong className="mono">{current?.active_revision?.slice(0,8)??'—'}</strong><small>{generation?'Signed and ready for SDKs':'No release activated yet'}</small></article></div>
-  <div className="columns"><section className="panel"><div className="panel-title"><h2>Configuration studio</h2><span className="pill">BASE {generation}</span></div><p>Rollout uses basis points: 1,000 = 10%. Keep the salt stable to preserve cohorts.</p><label>Bundle JSON<textarea aria-label="Bundle JSON" spellCheck={false} rows={15} value={draft} onChange={e=>{setDraft(e.target.value);setPreview([]);}}/></label>{role==='author'&&<button disabled={busy||!current} onClick={()=>run(async()=>{await api(root+'/revisions','POST',{bundle:JSON.parse(draft),base_generation:generation});await load();setNotice('Immutable proposal created. Sign in as a different reviewer to approve it.');})}>Propose revision</button>}<div className="preview"><h3>Preview cohort decisions</h3><label>Flag key<input aria-label="Flag key" value={flag} onChange={e=>setFlag(e.target.value)}/></label><label>Subject IDs · one per line<textarea aria-label="Subject IDs" rows={3} value={subjects} onChange={e=>setSubjects(e.target.value)}/></label><button className="secondary" disabled={busy||!current} onClick={()=>run(async()=>setPreview(await api(root+'/preview','POST',{bundle:JSON.parse(draft),flag,subjects:subjects.split('\n').filter(Boolean)})))}>Preview decisions</button><div aria-live="polite">{preview.map((p,i)=><div className="decision" key={i}><code>{subjects.split('\n').filter(Boolean)[i]}</code><span className={p.value?'on':'off'}>{p.value?'ON':'OFF'} · {p.reason}{p.bucket!==undefined?` / ${p.bucket}`:''}</span></div>)}</div></div></section>
-  <section className="panel"><div className="panel-title"><h2>Review queue</h2><span className="pill">IMMUTABLE</span></div><p>Activation checks the current generation. A conflict requires a fresh proposal.</p>{!revisions.length&&<div className="empty">No proposals yet. Start with a small cohort.</div>}{revisions.map(r=><article className="revision" key={r.id}><div className="panel-title"><code>{r.id.slice(0,8)}</code><span className={'pill '+(r.status==='approved'?'approved':'')}>{current?.active_revision===r.id?'ACTIVE':r.status.toUpperCase()}</span></div><p>By <b>{r.author}</b> · base {r.base_generation}{r.reviewer&&` · reviewed by ${r.reviewer}`}</p><details><summary>Inspect exact configuration</summary><pre>{JSON.stringify(r.bundle,null,2)}</pre></details><div className="actions"><button className="secondary" disabled={busy} onClick={()=>{setDraft(JSON.stringify(r.bundle,null,2));setPreview([]);}}>Load into studio</button>{role==='reviewer'&&<>{r.status==='draft'?<button disabled={busy} onClick={()=>run(async()=>{await api(`${root}/revisions/${r.id}/approve`,'POST');await load();})}>Approve</button>:<><button disabled={busy||r.base_generation!==generation} onClick={()=>run(async()=>{await api(`${root}/revisions/${r.id}/activate`,'POST',{expected_generation:generation});await load();setNotice('Release activated. SDKs observe it on their next successful refresh.');})}>Activate</button>{r.base_generation<generation&&<button className="danger" disabled={busy||current?.active_revision===r.id} onClick={()=>run(async()=>{await api(`${root}/revisions/${r.id}/activate`,'POST',{expected_generation:generation,rollback:true});await load();setNotice('Rollback activated as a new generation.');})}>Rollback to revision</button>}</>}</>}</div></article>)}</section></div>
-  <section className="panel audit"><div className="panel-title"><h2>Decision trail</h2><span className="pill">FIRST 100 EVENTS</span></div><div className="table-wrap"><table><thead><tr><th>Sequence</th><th>Action</th><th>Actor</th><th>Generation</th><th>Time</th></tr></thead><tbody>{events.map(e=><tr key={e.sequence}><td>#{e.sequence}</td><td>{e.event.action}</td><td>{e.event.actor}</td><td>{e.event.generation??'—'}</td><td>{new Date(e.created_at).toLocaleString()}</td></tr>)}</tbody></table></div></section></>}
-  <footer>Signal Loom / reviewed release control <span>Use synthetic subject IDs. Configuration is not a secret store.</span></footer></main></div>;
+export function App() {
+  const [token, setToken] = useState(""),
+    [connected, setConnected] = useState(false),
+    [role, setRole] = useState("author");
+  const [envs, setEnvs] = useState<Environment[]>([]),
+    [env, setEnv] = useState("prod"),
+    [newEnv, setNewEnv] = useState("prod");
+  const [revisions, setRevisions] = useState<Revision[]>([]),
+    [events, setEvents] = useState<Event[]>([]);
+  const [draft, setDraft] = useState(JSON.stringify(initial, null, 2)),
+    [subjects, setSubjects] = useState("customer-1\ncustomer-2\ncustomer-3");
+  const [flag, setFlag] = useState("new_checkout"),
+    [preview, setPreview] = useState<
+      { value: boolean; reason: string; bucket?: number }[]
+    >([]);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState("");
+  const current = envs.find((e) => e.name === env),
+    generation = current?.generation ?? 0;
+  async function api(path: string, method = "GET", body?: unknown) {
+    const response = await fetch("/v1" + path, {
+      method,
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const detail = await response
+        .json()
+        .catch(() => ({ detail: "Request failed" }));
+      throw new Error(
+        typeof detail.detail === "string"
+          ? detail.detail
+          : JSON.stringify(detail.detail),
+      );
+    }
+    return response.status === 204 ? null : response.json();
+  }
+  async function load(selected = env) {
+    const list: Environment[] = await api("/environments");
+    setEnvs(list);
+    if (list.some((e) => e.name === selected)) {
+      const [r, a] = await Promise.all([
+        api(`/environments/${selected}/revisions`),
+        api(`/environments/${selected}/audit`),
+      ]);
+      setRevisions(r);
+      setEvents(a);
+    } else {
+      setRevisions([]);
+      setEvents([]);
+    }
+  }
+  async function run(work: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await work();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const root = `/environments/${env}`;
+  function disconnect() {
+    setToken("");
+    setConnected(false);
+    setEnvs([]);
+    setRevisions([]);
+    setEvents([]);
+    setPreview([]);
+    setError("");
+    setNotice("");
+  }
+  return (
+    <div className="shell">
+      <aside>
+        <a className="brand" href="#">
+          <span className="mark">≋</span> SIGNAL LOOM
+        </a>
+        <div className="workspace">RELEASE WORKSPACE</div>
+        <div className="nav active">◉ &nbsp; Release control</div>
+        <div className="nav muted">↳ &nbsp; Review · Activate · Observe</div>
+        <div className="side-note">
+          <span className="dot" /> Local evaluation
+          <br />
+          <small>
+            Signed snapshots. Stable cohorts.
+            <br />
+            Explicit freshness limits.
+          </small>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <div className="eyebrow">CONTROL PLANE / ENVIRONMENTS</div>
+            <h1>Ship with a clear signal.</h1>
+            <p>Review the change. Preview its reach. Release with a record.</p>
+          </div>
+          <span className="badge">REFERENCE SYSTEM · v0.1</span>
+        </header>
+        <section className="connection">
+          <label>
+            Session credential
+            <input
+              aria-label="Session credential"
+              type="password"
+              autoComplete="off"
+              value={token}
+              disabled={connected}
+              placeholder="Paste a scoped credential"
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </label>
+          <label>
+            Console view
+            <select
+              aria-label="Console view"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              <option value="author">Author</option>
+              <option value="reviewer">Reviewer</option>
+              <option value="reader">Reader</option>
+            </select>
+          </label>
+          <button
+            disabled={busy || !token}
+            onClick={() =>
+              connected
+                ? disconnect()
+                : run(async () => {
+                    await load();
+                    setConnected(true);
+                  })
+            }
+          >
+            {connected ? "Disconnect" : "Connect"}
+          </button>
+          <small>Token stays in memory. The API enforces your role.</small>
+        </section>
+        {error && (
+          <div role="alert" className="alert">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="notice">
+            {notice}
+          </div>
+        )}
+        {!connected ? (
+          <section className="welcome">
+            <span className="eyebrow">A RELEASE IS A REVIEWED DECISION</span>
+            <h2>From proposal to a verified snapshot.</h2>
+            <div className="steps">
+              <div>
+                <b>01 / Propose</b>
+                <p>
+                  Build an immutable configuration against the current
+                  generation.
+                </p>
+              </div>
+              <div>
+                <b>02 / Review</b>
+                <p>
+                  A different actor checks the rules and approves the change.
+                </p>
+              </div>
+              <div>
+                <b>03 / Activate</b>
+                <p>Publish atomically. Clients verify and evaluate locally.</p>
+              </div>
+            </div>
+            <p className="muted">
+              Run the quick-start seed script to create independent author,
+              reviewer, and SDK credentials.
+            </p>
+          </section>
+        ) : (
+          <>
+            <section className="toolbar">
+              <label>
+                Environment
+                <select
+                  aria-label="Environment"
+                  value={env}
+                  onChange={(e) => {
+                    const selected = e.target.value;
+                    setEnv(selected);
+                    setPreview([]);
+                    void run(() => load(selected));
+                  }}
+                >
+                  {envs.length ? (
+                    envs.map((e) => <option key={e.name}>{e.name}</option>)
+                  ) : (
+                    <option>prod</option>
+                  )}
+                </select>
+              </label>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => run(() => load())}
+              >
+                Refresh
+              </button>
+              {role === "author" && (
+                <>
+                  <input
+                    aria-label="New environment"
+                    value={newEnv}
+                    onChange={(e) => setNewEnv(e.target.value)}
+                  />
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await api("/environments", "POST", { name: newEnv });
+                        setEnv(newEnv);
+                        await load(newEnv);
+                      })
+                    }
+                  >
+                    Create environment
+                  </button>
+                </>
+              )}
+            </section>
+            <div className="metrics">
+              <article>
+                <span>ACTIVE GENERATION</span>
+                <strong>{generation.toString().padStart(2, "0")}</strong>
+                <small>Compare-and-set release boundary</small>
+              </article>
+              <article>
+                <span>REVISIONS SHOWN</span>
+                <strong>{revisions.length}</strong>
+                <small>Latest 100 proposals</small>
+              </article>
+              <article>
+                <span>ACTIVE REVISION</span>
+                <strong className="mono">
+                  {current?.active_revision?.slice(0, 8) ?? "—"}
+                </strong>
+                <small>
+                  {generation
+                    ? "Signed and ready for SDKs"
+                    : "No release activated yet"}
+                </small>
+              </article>
+            </div>
+            <div className="columns">
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>Configuration studio</h2>
+                  <span className="pill">BASE {generation}</span>
+                </div>
+                <p>
+                  Rollout uses basis points: 1,000 = 10%. Keep the salt stable
+                  to preserve cohorts.
+                </p>
+                <label>
+                  Bundle JSON
+                  <textarea
+                    aria-label="Bundle JSON"
+                    spellCheck={false}
+                    rows={15}
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value);
+                      setPreview([]);
+                    }}
+                  />
+                </label>
+                {role === "author" && (
+                  <button
+                    disabled={busy || !current}
+                    onClick={() =>
+                      run(async () => {
+                        await api(root + "/revisions", "POST", {
+                          bundle: JSON.parse(draft),
+                          base_generation: generation,
+                        });
+                        await load();
+                        setNotice(
+                          "Immutable proposal created. Sign in as a different reviewer to approve it.",
+                        );
+                      })
+                    }
+                  >
+                    Propose revision
+                  </button>
+                )}
+                <div className="preview">
+                  <h3>Preview cohort decisions</h3>
+                  <label>
+                    Flag key
+                    <input
+                      aria-label="Flag key"
+                      value={flag}
+                      onChange={(e) => setFlag(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Subject IDs · one per line
+                    <textarea
+                      aria-label="Subject IDs"
+                      rows={3}
+                      value={subjects}
+                      onChange={(e) => setSubjects(e.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="secondary"
+                    disabled={busy || !current}
+                    onClick={() =>
+                      run(async () =>
+                        setPreview(
+                          await api(root + "/preview", "POST", {
+                            bundle: JSON.parse(draft),
+                            flag,
+                            subjects: subjects.split("\n").filter(Boolean),
+                          }),
+                        ),
+                      )
+                    }
+                  >
+                    Preview decisions
+                  </button>
+                  <div aria-live="polite">
+                    {preview.map((p, i) => (
+                      <div className="decision" key={i}>
+                        <code>{subjects.split("\n").filter(Boolean)[i]}</code>
+                        <span className={p.value ? "on" : "off"}>
+                          {p.value ? "ON" : "OFF"} · {p.reason}
+                          {p.bucket !== undefined ? ` / ${p.bucket}` : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>Review queue</h2>
+                  <span className="pill">IMMUTABLE</span>
+                </div>
+                <p>
+                  Activation checks the current generation. A conflict requires
+                  a fresh proposal.
+                </p>
+                {!revisions.length && (
+                  <div className="empty">
+                    No proposals yet. Start with a small cohort.
+                  </div>
+                )}
+                {revisions.map((r) => (
+                  <article className="revision" key={r.id}>
+                    <div className="panel-title">
+                      <code>{r.id.slice(0, 8)}</code>
+                      <span
+                        className={
+                          "pill " + (r.status === "approved" ? "approved" : "")
+                        }
+                      >
+                        {current?.active_revision === r.id
+                          ? "ACTIVE"
+                          : r.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <p>
+                      By <b>{r.author}</b> · base {r.base_generation}
+                      {r.reviewer && ` · reviewed by ${r.reviewer}`}
+                    </p>
+                    <details>
+                      <summary>Inspect exact configuration</summary>
+                      <pre>{JSON.stringify(r.bundle, null, 2)}</pre>
+                    </details>
+                    <div className="actions">
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          setDraft(JSON.stringify(r.bundle, null, 2));
+                          setPreview([]);
+                        }}
+                      >
+                        Load into studio
+                      </button>
+                      {role === "reviewer" && (
+                        <>
+                          {r.status === "draft" ? (
+                            <button
+                              disabled={busy}
+                              onClick={() =>
+                                run(async () => {
+                                  await api(
+                                    `${root}/revisions/${r.id}/approve`,
+                                    "POST",
+                                  );
+                                  await load();
+                                })
+                              }
+                            >
+                              Approve
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                disabled={
+                                  busy || r.base_generation !== generation
+                                }
+                                onClick={() =>
+                                  run(async () => {
+                                    await api(
+                                      `${root}/revisions/${r.id}/activate`,
+                                      "POST",
+                                      { expected_generation: generation },
+                                    );
+                                    await load();
+                                    setNotice(
+                                      "Release activated. SDKs observe it on their next successful refresh.",
+                                    );
+                                  })
+                                }
+                              >
+                                Activate
+                              </button>
+                              {r.base_generation < generation && (
+                                <button
+                                  className="danger"
+                                  disabled={
+                                    busy || current?.active_revision === r.id
+                                  }
+                                  onClick={() =>
+                                    run(async () => {
+                                      await api(
+                                        `${root}/revisions/${r.id}/activate`,
+                                        "POST",
+                                        {
+                                          expected_generation: generation,
+                                          rollback: true,
+                                        },
+                                      );
+                                      await load();
+                                      setNotice(
+                                        "Rollback activated as a new generation.",
+                                      );
+                                    })
+                                  }
+                                >
+                                  Rollback to revision
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            </div>
+            <section className="panel audit">
+              <div className="panel-title">
+                <h2>Decision trail</h2>
+                <span className="pill">FIRST 100 EVENTS</span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Sequence</th>
+                      <th>Action</th>
+                      <th>Actor</th>
+                      <th>Generation</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((e) => (
+                      <tr key={e.sequence}>
+                        <td>#{e.sequence}</td>
+                        <td>{e.event.action}</td>
+                        <td>{e.event.actor}</td>
+                        <td>{e.event.generation ?? "—"}</td>
+                        <td>{new Date(e.created_at).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+        <footer>
+          Signal Loom / reviewed release control{" "}
+          <span>
+            Use synthetic subject IDs. Configuration is not a secret store.
+          </span>
+        </footer>
+      </main>
+    </div>
+  );
 }
-if(document.getElementById('root'))createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
+if (document.getElementById("root"))
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );

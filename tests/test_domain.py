@@ -31,8 +31,19 @@ def test_cohorts_are_stable_and_monotonic():
     assert values != [bucket("other/prod", b.flags[0], str(i)) for i in range(2000)]
 
 
-@pytest.mark.parametrize("change", [{"rollout": -1}, {"rollout": 10001}, {"rollout": True},
-    {"rollout": "50"}, {"enabled": "false"}, {"key": "bad key"}, {"salt": ""}, {"unknown": 1}])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"rollout": -1},
+        {"rollout": 10001},
+        {"rollout": True},
+        {"rollout": "50"},
+        {"enabled": "false"},
+        {"key": "bad key"},
+        {"salt": ""},
+        {"unknown": 1},
+    ],
+)
 def test_invalid_flag(change):
     with pytest.raises(ValidationError):
         Flag.model_validate({"key": "checkout", "rollout": 50, "salt": "v1", **change})

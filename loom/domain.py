@@ -1,4 +1,5 @@
 """Versioned evaluation contract. No network, database, clock or random state."""
+
 import hashlib
 import json
 from typing import Annotated
